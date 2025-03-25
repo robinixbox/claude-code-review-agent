@@ -1,0 +1,24 @@
+{
+  "repo_url": "https://github.com/fastlane/fastlane",
+  "target_path": "fastlane/lib/fastlane/actions/analyze_ios_build.rb",
+  "exclude_paths": [
+    "node_modules",
+    "vendor",
+    ".bundle",
+    ".git",
+    "__pycache__"
+  ],
+  "review_settings": {
+    "max_files_per_run": 1,
+    "language_focus": "ruby",
+    "verbose_output": true,
+    "output_language": "french",
+    "checks": [
+      "code_quality",
+      "performance",
+      "security",
+      "best_practices",
+      "maintainability"
+    ]
+  }
+}
