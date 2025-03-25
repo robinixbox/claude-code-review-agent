@@ -85,15 +85,7 @@ L'agent peut être configuré pour s'exécuter automatiquement via GitHub Action
 
 #### Configuration des Secrets GitHub
 
-Pour utiliser GitHub Actions, vous devez configurer les secrets suivants dans votre dépôt:
-
-1. Allez dans les paramètres du dépôt > Secrets and variables > Actions
-2. Ajoutez les secrets suivants:
-   - `ANTHROPIC_API_KEY`: Votre clé API Claude
-   - `GITHUB_API_KEY`: Votre token d'accès personnel GitHub
-   - `GITHUB_USERNAME`: Votre nom d'utilisateur GitHub
-   - `NOTION_API_KEY`: Votre clé API Notion (optionnel)
-   - `NOTION_PAGE_ID`: L'ID de votre page Notion (optionnel)
+Pour utiliser GitHub Actions, vous devez configurer les secrets dans votre dépôt. Consultez le [guide de configuration des GitHub Actions](GITHUB_ACTIONS_SETUP.md) pour plus de détails.
 
 ## ⏱️ Temps d'exécution
 
@@ -116,6 +108,7 @@ claude-code-review-agent/
 ├── config.json                # Configuration par défaut
 ├── .env.example               # Exemple de configuration des clés API
 ├── requirements.txt           # Dépendances du projet
+├── GITHUB_ACTIONS_SETUP.md    # Guide de configuration des GitHub Actions
 └── README.md                  # Documentation
 ```
 
@@ -138,6 +131,10 @@ Le workflow GitHub Actions permet trois modes de fonctionnement:
 2. **Exécution manuelle**: Déclenchement manuel avec spécification du dépôt et du chemin à analyser.
 
 3. **Analyse de Pull Request**: Détection automatique des modifications dans une PR et analyse des fichiers Python modifiés.
+
+## 📋 Documentation
+
+- [Guide de configuration des GitHub Actions](GITHUB_ACTIONS_SETUP.md) - Comment configurer les secrets et utiliser les workflows GitHub Actions
 
 ## 🤝 Contribution
 
