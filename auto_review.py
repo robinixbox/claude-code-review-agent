@@ -7,7 +7,16 @@ import os
 import json
 import argparse
 import ast
+import traceback
+import logging
 from claude_code_reviewer import ReviewCrew
+
+# Configuration du logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def parse_args():
     """Parse command line arguments"""
@@ -20,10 +29,12 @@ def parse_args():
 def load_config(config_path):
     """Load configuration from a JSON file"""
     try:
-        with open(config_path, 'r') as f:
-            return json.load(f)
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            logger.info(f"✅ Configuration chargée depuis {config_path}")
+            return config
     except Exception as e:
-        print(f"❌ Erreur lors du chargement de la configuration: {e}")
+        logger.error(f"❌ Erreur lors du chargement de la configuration: {e}")
         return None
 
 def main():
@@ -45,11 +56,11 @@ def main():
     target_path = args.target if args.target else (config.get('target_path') if config else None)
     
     if not repo_url:
-        print("❌ URL du dépôt GitHub non spécifiée. Utilisez --repo ou un fichier de configuration.")
+        logger.error("❌ URL du dépôt GitHub non spécifiée. Utilisez --repo ou un fichier de configuration.")
         return
     
     if not target_path:
-        print("❌ Chemin cible non spécifié. Utilisez --target ou un fichier de configuration.")
+        logger.error("❌ Chemin cible non spécifié. Utilisez --target ou un fichier de configuration.")
         return
     
     # Extract owner and repository from GitHub URL
@@ -58,20 +69,20 @@ def main():
         owner = split_url[3]
         repo = split_url[4]
     except IndexError:
-        print("❌ URL GitHub invalide. Format attendu: https://github.com/username/repository")
+        logger.error("❌ URL GitHub invalide. Format attendu: https://github.com/username/repository")
         return
     
-    print(f"\n🔍 Analyse du dépôt {owner}/{repo}...")
+    logger.info(f"🔍 Analyse du dépôt {owner}/{repo}...")
     
     # Retrieve repository file tree
     from claude_code_reviewer import get_file_tree, global_path
     get_file_tree(owner=owner, repo=repo)
     
     if not global_path:
-        print("❌ Impossible de récupérer la structure du dépôt. Vérifiez vos identifiants et l'URL.")
+        logger.error("❌ Impossible de récupérer la structure du dépôt. Vérifiez vos identifiants et l'URL.")
         return
     
-    print(f"✅ Structure du dépôt récupérée")
+    logger.info("✅ Structure du dépôt récupérée")
     
     # Create a Notion page if API keys are configured
     page_id = None
@@ -83,46 +94,93 @@ def main():
             from claude_code_reviewer import create_notion_page
             page_id = create_notion_page(project_name=repo)
             if page_id:
-                print(f"✅ Page Notion créée pour stocker les résultats")
+                logger.info(f"✅ Page Notion créée pour stocker les résultats")
         except Exception as e:
-            print(f"⚠️ Erreur lors de la création de la page Notion: {e}")
+            logger.warning(f"⚠️ Erreur lors de la création de la page Notion: {e}")
     
     # Import the PathAgent to find matching files
     from claude_code_reviewer import Agents, Tasks
     
     path_agent = Agents.path_agent()
+    if not path_agent:
+        logger.error("❌ Impossible de créer l'agent de chemin. Vérifiez votre clé API Claude.")
+        return
+        
     path_task = Tasks.get_file_path_task(agent=path_agent, filetree=global_path, user_input=target_path)
     
-    print(f"\n🔍 Recherche des fichiers correspondant à '{target_path}'...")
-    paths_output = path_task.execute()
+    logger.info(f"🔍 Recherche des fichiers correspondant à '{target_path}'...")
     
     try:
-        paths = ast.literal_eval(paths_output)
+        paths_output = path_task.execute()
+        
+        # Tenter d'analyser le résultat comme JSON d'abord
+        try:
+            paths = json.loads(paths_output)
+        except json.JSONDecodeError:
+            # Si ce n'est pas un JSON valide, essayer avec ast.literal_eval
+            paths = ast.literal_eval(paths_output)
         
         if not paths:
-            print(f"❌ Aucun fichier trouvé correspondant à '{target_path}'")
+            logger.error(f"❌ Aucun fichier trouvé correspondant à '{target_path}'")
             return
             
-        print(f"✅ {len(paths)} fichier(s) trouvé(s)")
+        logger.info(f"✅ {len(paths)} fichier(s) trouvé(s)")
+        
+        # Récupérer la limite de fichiers depuis la configuration
+        max_files = 10  # Valeur par défaut
+        if config and 'review_settings' in config and 'max_files_per_run' in config['review_settings']:
+            max_files = config['review_settings']['max_files_per_run']
+        
+        # Limiter le nombre de fichiers à analyser
+        if len(paths) > max_files:
+            logger.warning(f"⚠️ Limitation à {max_files} fichiers sur les {len(paths)} trouvés")
+            paths = paths[:max_files]
         
         # Analyze each file one by one
+        results = []
         for i, path in enumerate(paths):
-            print(f"\n📄 ({i+1}/{len(paths)}) Analyse de {path}...")
+            logger.info(f"📄 ({i+1}/{len(paths)}) Analyse de {path}...")
             
-            # Execute the review crew
-            review_crew = ReviewCrew(owner=owner, repo=repo, page_id=page_id, path=path)
-            result = review_crew.run()
-            
-            # Display results
-            print(f"✅ Revue terminée pour {path}")
-            print(f"Résultat: {result}")
+            try:
+                # Execute the review crew
+                review_crew = ReviewCrew(owner=owner, repo=repo, page_id=page_id, path=path)
+                result = review_crew.run()
+                
+                # Enregistrer le résultat
+                results.append({
+                    "file": path,
+                    "result": result,
+                    "success": True
+                })
+                
+                # Display results
+                logger.info(f"✅ Revue terminée pour {path}")
+            except Exception as e:
+                logger.error(f"❌ Erreur lors de l'analyse de {path}: {e}")
+                logger.error(traceback.format_exc())
+                results.append({
+                    "file": path,
+                    "result": str(e),
+                    "success": False
+                })
         
-        print("\n✅ Toutes les revues sont terminées!")
+        # Résumé des résultats
+        success_count = sum(1 for r in results if r["success"])
+        logger.info(f"\n✅ {success_count}/{len(paths)} revues terminées avec succès!")
+        
+        if success_count < len(paths):
+            logger.warning(f"⚠️ {len(paths) - success_count} fichier(s) n'ont pas pu être analysés")
+            
+        # Afficher le détail des erreurs
+        for result in [r for r in results if not r["success"]]:
+            logger.error(f"❌ Échec pour {result['file']}: {result['result']}")
+        
         if page_id:
-            print(f"📝 Les résultats ont été exportés vers Notion")
+            logger.info(f"📝 Les résultats ont été exportés vers Notion")
     
     except Exception as e:
-        print(f"❌ Erreur lors de l'analyse: {e}")
+        logger.error(f"❌ Erreur lors de l'analyse: {e}")
+        logger.error(traceback.format_exc())
 
 if __name__ == "__main__":
     main()
