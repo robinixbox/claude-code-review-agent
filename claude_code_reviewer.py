@@ -339,7 +339,7 @@ class Agents:
         """Agent de revue de code"""
         return Agent(
             role='Senior software developer',
-            goal='Effectuer des revues de code sur un fichier donné pour vérifier s'il correspond aux standards de code de l'industrie',
+            goal="Effectuer des revues de code sur un fichier donné pour vérifier s'il correspond aux standards de code de l'industrie",
             backstory="Tu es un développeur logiciel senior dans une grande entreprise et tu dois effectuer une revue de code sur un contenu de fichier donné.",
             allow_delegation=False,
             verbose=True,
