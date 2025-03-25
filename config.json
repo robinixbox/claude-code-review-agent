@@ -1,0 +1,21 @@
+{
+  "repo_url": "https://github.com/robinixbox/claude-code-review-agent",
+  "target_path": ".",
+  "exclude_paths": [
+    "node_modules",
+    "venv",
+    ".env",
+    ".git",
+    "__pycache__"
+  ],
+  "review_settings": {
+    "max_files_per_run": 10,
+    "language_focus": "python",
+    "checks": [
+      "code_quality",
+      "performance",
+      "security",
+      "best_practices"
+    ]
+  }
+}
