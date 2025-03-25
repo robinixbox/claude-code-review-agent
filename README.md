@@ -31,34 +31,56 @@ Un agent autonome créé avec [CrewAI](https://www.crewai.io/) et l'API Claude d
    pip install -r requirements.txt
    ```
 
-3. Créez un fichier `.env` à la racine du projet avec vos clés API
+3. Configurez vos clés API
+   - Copiez le fichier `.env.example` en `.env`
+   - Ajoutez vos clés API dans le fichier `.env`
+
    ```
    ANTHROPIC_API_KEY=votre_clé_api_claude
-   GITHUB_SECRET_KEY=votre_token_github
+   GITHUB_API_KEY=votre_token_github
+   GITHUB_USERNAME=votre_nom_utilisateur_github
    NOTION_API_KEY=votre_clé_api_notion  # Optionnel
+   NOTION_PAGE_ID=votre_page_id_notion  # Optionnel
    ```
 
 ## 💻 Utilisation
 
-### Via le script Python
+Exécutez le script principal:
 
 ```bash
-python review.py
+python claude_code_reviewer.py
 ```
 
-### Via le notebook Jupyter
+Le script vous demandera:
+1. L'URL du dépôt GitHub à analyser (ex: https://github.com/username/repository)
+2. Le nom du fichier ou du dossier à examiner
 
-Ouvrez et exécutez le notebook `code_review_agent.ipynb`.
+L'agent va alors:
+1. Récupérer la structure du dépôt GitHub
+2. Identifier les fichiers correspondant à votre recherche
+3. Analyser chaque fichier à l'aide de l'API Claude
+4. Générer des recommandations d'amélioration et du code optimisé
+5. Afficher les résultats dans le terminal
+6. Exporter les résultats dans Notion (si configuré)
+
+## ⏱️ Temps d'exécution
+
+Le temps d'exécution varie en fonction de la taille et de la complexité du code, ainsi que du nombre de fichiers à analyser:
+
+- Fichier simple (100-200 lignes): 1-2 minutes
+- Dossier avec plusieurs fichiers: 5-15 minutes selon le nombre de fichiers
+- Projet entier: 15-60 minutes selon la taille du projet
+
+L'agent analyse les fichiers un par un, ce qui permet d'obtenir des premiers résultats rapidement même pour des projets plus grands.
 
 ## 🧩 Structure du projet
 
 ```
 claude-code-review-agent/
-├── code_review_agent.ipynb    # Notebook pour exécuter l'agent
-├── review.py                  # Script principal pour lancer la revue
+├── claude_code_reviewer.py    # Script principal
+├── .env.example               # Exemple de configuration des clés API
 ├── requirements.txt           # Dépendances du projet
-├── .env                       # Fichier de configuration (à créer)
-└── README.md                  # Ce fichier
+└── README.md                  # Documentation
 ```
 
 ## 🔍 Comment ça marche ?
@@ -67,7 +89,7 @@ claude-code-review-agent/
 
 2. **Analyse du contenu** : Pour chaque fichier, l'agent utilise l'API GitHub pour récupérer le contenu.
 
-3. **Revue du code** : L'agent Claude analyse chaque fichier et propose des améliorations.
+3. **Revue du code** : L'agent Claude analyse chaque fichier et propose des améliorations basées sur les meilleures pratiques de développement.
 
 4. **Exportation des résultats** : Les résultats sont affichés dans la console et peuvent être exportés vers Notion (si configuré).
 
