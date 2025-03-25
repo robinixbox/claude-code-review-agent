@@ -7,11 +7,19 @@ import ast
 import base64
 import json
 import requests
+import logging
 from dotenv import load_dotenv
 from textwrap import dedent
 from langchain.tools import tool
 from crewai import Agent, Task, Crew, Process
 from anthropic import Anthropic
+
+# Configuration du logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Chargement des variables d'environnement
 load_dotenv()
@@ -23,8 +31,13 @@ GITHUB_API_KEY = os.getenv("GITHUB_API_KEY", "ghp_CohWQti...")  # Remplacez par 
 GITHUB_USERNAME = os.getenv("GITHUB_USERNAME", "robinixbox")  # Remplacez par votre nom d'utilisateur
 
 # Configuration d'Anthropic (Claude API)
-print("🔌 Initialisation de l'API Claude...")
-anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
+logger.info("🔌 Initialisation de l'API Claude...")
+try:
+    anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
+    logger.info("✅ API Claude initialisée avec succès")
+except Exception as e:
+    logger.error(f"❌ Erreur lors de l'initialisation de l'API Claude: {e}")
+    anthropic_client = None
 
 # Variable globale pour stocker la structure du dépôt
 global_path = ""
@@ -32,17 +45,21 @@ global_path = ""
 # Configuration Notion (si la clé est présente)
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 NOTION_PAGE_ID = os.getenv("NOTION_PAGE_ID")
+notion = None
 if NOTION_API_KEY:
-    from notion_client import Client
-    notion = Client(auth=NOTION_API_KEY)
-    print("✅ API Notion configurée")
+    try:
+        from notion_client import Client
+        notion = Client(auth=NOTION_API_KEY)
+        logger.info("✅ API Notion configurée")
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de l'initialisation de l'API Notion: {e}")
 
 def create_notion_page(project_name):
     """
     Crée une page Notion pour stocker les résultats de la revue
     """
-    if not NOTION_API_KEY or not NOTION_PAGE_ID:
-        print("⚠️ Configuration Notion incomplète. Les résultats ne seront pas exportés.")
+    if not NOTION_API_KEY or not NOTION_PAGE_ID or not notion:
+        logger.warning("⚠️ Configuration Notion incomplète. Les résultats ne seront pas exportés.")
         return None
         
     parent = {"type": "page_id", "page_id": NOTION_PAGE_ID}
@@ -55,9 +72,10 @@ def create_notion_page(project_name):
     
     try:
         create_page_response = notion.pages.create(parent=parent, properties=properties)
+        logger.info(f"✅ Page Notion créée: {create_page_response['id']}")
         return create_page_response['id']
     except Exception as e:
-        print(f"❌ Erreur lors de la création de la page Notion: {e}")
+        logger.error(f"❌ Erreur lors de la création de la page Notion: {e}")
         return None
 
 def get_file_tree(owner, repo, path='', level=0):
@@ -72,7 +90,7 @@ def get_file_tree(owner, repo, path='', level=0):
     - level: La profondeur actuelle dans la structure arborescente.
     """
     # Répertoires à ignorer
-    ignore_dirs = {'public', 'images', 'media', 'assets', 'node_modules', '.git'}
+    ignore_dirs = {'public', 'images', 'media', 'assets', 'node_modules', '.git', '__pycache__', 'venv', '.venv'}
     global global_path
     
     api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
@@ -82,10 +100,7 @@ def get_file_tree(owner, repo, path='', level=0):
     try:
         # Effectue la requête
         response = requests.get(api_url, headers=headers)
-        if response.status_code != 200:
-            print(f"❌ Erreur HTTP {response.status_code}: {response.reason}")
-            print(f"URL: {api_url}")
-            return
+        response.raise_for_status()
             
         items = response.json()
         
@@ -98,8 +113,11 @@ def get_file_tree(owner, repo, path='', level=0):
                 global_path += f"{' ' * (level * 2)}- {item['name']}\n"
                 if item['type'] == 'dir':
                     get_file_tree(owner, repo, item['path'], level + 1)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Erreur HTTP lors de la récupération de la structure du dépôt: {e}")
+        logger.error(f"URL: {api_url}")
     except Exception as e:
-        print(f"❌ Erreur lors de la récupération de la structure du dépôt: {e}")
+        logger.error(f"❌ Erreur lors de la récupération de la structure du dépôt: {e}")
 
 class Tools:
     """Outils personnalisés pour les agents"""
@@ -109,10 +127,21 @@ class Tools:
         """
         Utilisé pour ajouter des données à un document Notion.
         """
-        if not NOTION_API_KEY or not page_id:
+        if not NOTION_API_KEY or not page_id or not notion:
             return "Notion n'est pas configuré. Les résultats ne seront pas exportés."
         
         try:
+            # Vérifier si output est une chaîne ou une liste
+            if isinstance(output, str):
+                try:
+                    output = json.loads(output.replace("'", "\""))
+                except json.JSONDecodeError:
+                    return f"Erreur: Impossible de parser les données: {output}"
+            
+            # Vérifier la structure attendue
+            if not isinstance(output, list) or len(output) < 3:
+                return f"Erreur: Format de données incorrect: {output}"
+            
             children = [
                 {
                     "object": "block",
@@ -141,35 +170,42 @@ class Tools:
                     "paragraph": {
                         "rich_text": [{"type": "text", "text": {"content": output[2]}}]
                     }
-                },
-                {
-                    "object": "block",
-                    "type": "heading_2",
-                    "heading_2": {
-                        "rich_text": [{"type": "text", "text": {"content": "💡 Code amélioré"}}]
-                    }
-                },
-                {
-                    "object": "block",
-                    "type": "code",
-                    "code": {
-                        "caption": [],
-                        "rich_text": [{
-                            "type": "text",
-                            "text": {
-                                "content": output[3]
-                            }
-                        }],
-                        "language": "python"  # À adapter en fonction du type de fichier
-                    }
-                },
+                }
             ]
+            
+            # Ajouter le code amélioré s'il existe
+            if len(output) >= 4:
+                children.extend([
+                    {
+                        "object": "block",
+                        "type": "heading_2",
+                        "heading_2": {
+                            "rich_text": [{"type": "text", "text": {"content": "💡 Code amélioré"}}]
+                        }
+                    },
+                    {
+                        "object": "block",
+                        "type": "code",
+                        "code": {
+                            "caption": [],
+                            "rich_text": [{
+                                "type": "text",
+                                "text": {
+                                    "content": output[3]
+                                }
+                            }],
+                            "language": "python"  # À adapter en fonction du type de fichier
+                        }
+                    }
+                ])
             
             add_data_response = notion.blocks.children.append(
                 block_id=page_id, children=children
             )
+            logger.info(f"✅ Données ajoutées à Notion: {page_id}")
             return "Données ajoutées avec succès à Notion"
         except Exception as e:
+            logger.error(f"❌ Erreur lors de l'ajout à Notion: {e}")
             return f"Erreur lors de l'ajout à Notion: {e}"
 
     @tool("get file contents from given file path")
@@ -190,30 +226,34 @@ class Tools:
         try:
             # Effectue la requête
             response = requests.get(api_url, headers=headers)
+            response.raise_for_status()
             
-            # Vérifie si la requête a réussi
-            if response.status_code == 200:
-                file_content = response.json()
+            file_content = response.json()
+            
+            # Vérifie la taille du fichier
+            if file_content['size'] > 1000000:  # 1MB en octets
+                logger.warning(f"⚠️ Fichier trop volumineux (>1Mo): {path}")
+                return "Ignoré: Taille du fichier supérieure à 1 Mo."
+            
+            # Le contenu est encodé en Base64, donc on le décode
+            content_decoded = base64.b64decode(file_content['content'])
+            
+            # Convertit les octets en chaîne de caractères
+            content_str = content_decoded.decode('utf-8')
+            
+            # Vérifie le nombre de lignes dans le fichier
+            if len(content_str.split('\n')) > 1000:
+                logger.warning(f"⚠️ Fichier trop long (>1000 lignes): {path}")
+                return "Ignoré: Le fichier contient plus de 1000 lignes."
                 
-                # Vérifie la taille du fichier
-                if file_content['size'] > 1000000:  # 1MB en octets
-                    return "Ignoré: Taille du fichier supérieure à 1 Mo."
-                
-                # Le contenu est encodé en Base64, donc on le décode
-                content_decoded = base64.b64decode(file_content['content'])
-                
-                # Convertit les octets en chaîne de caractères
-                content_str = content_decoded.decode('utf-8')
-                
-                # Vérifie le nombre de lignes dans le fichier
-                if len(content_str.split('\n')) > 1000:
-                    return "Ignoré: Le fichier contient plus de 1000 lignes."
-                    
-                return content_str
-            else:
-                # Gère les erreurs (par exemple, fichier non trouvé, accès refusé)
-                return f"Erreur: {response.status_code} - {response.reason}"
+            logger.info(f"✅ Contenu récupéré pour {path} ({len(content_str)} caractères)")
+            return content_str
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Erreur HTTP lors de la récupération du contenu: {e}")
+            logger.error(f"URL: {api_url}")
+            return f"Erreur: {e}"
         except Exception as e:
+            logger.error(f"❌ Erreur lors de la récupération du contenu: {e}")
             return f"Erreur lors de la récupération du contenu: {e}"
 
 class Tasks:
@@ -237,19 +277,17 @@ class Tasks:
                 review: revue_ici
                 updated_code: contenu mis à jour du fichier après modifications
                 
-                Renvoie la sortie qui suit la structure de tableau ci-dessous, chaque élément devant être 
-                enveloppé dans une chaîne multilignes.
-                Dans le cas d'updated_code, ajoute le code complet sous forme de chaîne multiligne.
+                Renvoie la sortie sous format JSON avec les clés suivantes :
+                [project_name, file_path, review, updated_code]
+                
+                Dans le cas d'updated_code, ajoute le code complet sous forme de chaîne.
                 Renvoie uniquement le contenu du fichier qui a été modifié dans updated_code ; s'il y a 
                 plusieurs modifications dans le contenu du fichier, alors envoie tout le contenu du fichier.
                 
-                Chaque tableau doit suivre ce format :
-                [project_name, file_path, review, updated_code]
-                
-                Ne renvoie rien d'autre que le tableau au format ci-dessus.
+                Ne renvoie rien d'autre que le tableau au format JSON donné ci-dessus.
                 """),
             context=context,
-            expected_output="Un tableau de 4 éléments au format donné dans la description"
+            expected_output="Un tableau JSON de 4 éléments au format donné dans la description"
         )
         
     def notion_task(agent, context, page_id):
@@ -301,12 +339,12 @@ class Tasks:
             Voici l'entrée utilisateur :
             {user_input}
             
-            REMARQUE : RENVOIE UNIQUEMENT UN TABLEAU DE CHEMINS SANS TEXTE SUPPLÉMENTAIRE DANS LA RÉPONSE
+            REMARQUE : RENVOIE UNIQUEMENT UN TABLEAU DE CHEMINS AU FORMAT JSON SANS TEXTE SUPPLÉMENTAIRE DANS LA RÉPONSE
             """),
             expected_output=dedent("""
-            UNIQUEMENT un tableau de chemins
+            UNIQUEMENT un tableau JSON de chemins
             Par exemple :
-            ['src/load/app.jsx', 'client/app/pages/404.js']
+            ["src/load/app.jsx", "client/app/pages/404.js"]
             """)
         )
         
@@ -337,6 +375,10 @@ class Agents:
     
     def review_agent():
         """Agent de revue de code"""
+        if not anthropic_client:
+            logger.error("❌ Impossible de créer l'agent de revue: API Claude non initialisée")
+            return None
+            
         return Agent(
             role='Senior software developer',
             goal="Effectuer des revues de code sur un fichier donné pour vérifier s'il correspond aux standards de code de l'industrie",
@@ -353,6 +395,10 @@ class Agents:
         
     def notion_agent():
         """Agent Notion"""
+        if not anthropic_client:
+            logger.error("❌ Impossible de créer l'agent Notion: API Claude non initialisée")
+            return None
+            
         return Agent(
             role="Expert API Notion et rédacteur de contenu",
             goal="Ajouter les données du tableau donné dans le document Notion en utilisant l'outil addToNotion",
@@ -370,6 +416,10 @@ class Agents:
         
     def path_agent():
         """Agent de chemin de fichier"""
+        if not anthropic_client:
+            logger.error("❌ Impossible de créer l'agent de chemin: API Claude non initialisée")
+            return None
+            
         return Agent(
             role="Extracteur de chemin de fichier",
             goal="Obtenir la structure arborescente du dossier et renvoyer les chemins complets du fichier donné ou des fichiers du dossier donné au format tableau",
@@ -386,6 +436,10 @@ class Agents:
         
     def content_agent():
         """Agent de contenu"""
+        if not anthropic_client:
+            logger.error("❌ Impossible de créer l'agent de contenu: API Claude non initialisée")
+            return None
+            
         return Agent(
             role="Expert API GitHub",
             goal="Obtenir le contenu du fichier donné en utilisant l'API GitHub",
@@ -413,49 +467,88 @@ class ReviewCrew:
         
     def run(self):
         """Exécution de l'équipe"""
+        # Vérification de l'API Claude
+        if not anthropic_client:
+            logger.error("❌ Impossible d'exécuter la revue: API Claude non initialisée")
+            return json.dumps(["error", self.path, "API Claude non initialisée", ""])
+            
         # Agents
         review_agent = Agents.review_agent()
         content_agent = Agents.content_agent()
         notion_agent = Agents.notion_agent() if NOTION_API_KEY else None
         
-        # Tâches
-        content_task = Tasks.get_file_content_task(
-            agent=content_agent, 
-            owner=self.owner, 
-            repo=self.repo, 
-            path=self.path
-        )
+        # Vérifie que les agents ont été créés correctement
+        if not review_agent or not content_agent:
+            logger.error("❌ Impossible d'exécuter la revue: Un ou plusieurs agents n'ont pas pu être créés")
+            return json.dumps(["error", self.path, "Erreur lors de la création des agents", ""])
         
-        review_task = Tasks.review_task(
-            agent=review_agent, 
-            repo=self.repo, 
-            context=[content_task]
-        )
-        
-        agents = [content_agent, review_agent]
-        tasks = [content_task, review_task]
-        
-        # Ajouter la tâche Notion si configurée
-        if notion_agent and self.page_id:
-            notion_task = Tasks.notion_task(
-                agent=notion_agent, 
-                page_id=self.page_id, 
-                context=[review_task]
+        try:
+            # Tâches
+            content_task = Tasks.get_file_content_task(
+                agent=content_agent, 
+                owner=self.owner, 
+                repo=self.repo, 
+                path=self.path
             )
-            tasks.append(notion_task)
-            agents.append(notion_agent)
-        
-        # Équipe
-        crew = Crew(
-            agents=agents,
-            tasks=tasks,
-            verbose=2,  # Tu peux le définir à 1 ou 2 pour différents niveaux de journalisation
-            process=Process.sequential
-        )
-        
-        # Exécution de l'équipe
-        result = crew.kickoff()
-        return result
+            
+            review_task = Tasks.review_task(
+                agent=review_agent, 
+                repo=self.repo, 
+                context=[content_task]
+            )
+            
+            agents = [content_agent, review_agent]
+            tasks = [content_task, review_task]
+            
+            # Ajouter la tâche Notion si configurée
+            if notion_agent and self.page_id:
+                notion_task = Tasks.notion_task(
+                    agent=notion_agent, 
+                    page_id=self.page_id, 
+                    context=[review_task]
+                )
+                tasks.append(notion_task)
+                agents.append(notion_agent)
+            
+            # Équipe
+            crew = Crew(
+                agents=agents,
+                tasks=tasks,
+                verbose=2,  # Tu peux le définir à 1 ou 2 pour différents niveaux de journalisation
+                process=Process.sequential
+            )
+            
+            # Exécution de l'équipe
+            logger.info(f"🚀 Démarrage de la revue pour {self.path}")
+            result = crew.kickoff()
+            logger.info(f"✅ Revue terminée pour {self.path}")
+            
+            # Normalisation du résultat
+            try:
+                # Vérifier si le résultat est déjà un JSON valide
+                if isinstance(result, str):
+                    json_result = json.loads(result)
+                    # Remettre en forme avec dumps pour avoir une chaîne JSON propre
+                    return json.dumps(json_result)
+                else:
+                    # Convertir le résultat en chaîne JSON
+                    return json.dumps(result)
+            except json.JSONDecodeError:
+                # Si ce n'est pas un JSON valide, essayer de le formater
+                try:
+                    # Remplacer les apostrophes par des guillemets
+                    formatted_result = result.replace("'", "\"")
+                    json_result = json.loads(formatted_result)
+                    return json.dumps(json_result)
+                except Exception as e:
+                    logger.error(f"❌ Erreur lors du formatage du résultat: {e}")
+                    # Retourner le résultat brut
+                    return result
+                    
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de l'exécution de la revue: {e}")
+            error_result = ["error", self.path, f"Erreur: {str(e)}", ""]
+            return json.dumps(error_result)
 
 def main():
     """Fonction principale"""
@@ -510,13 +603,22 @@ def main():
     
     # Récupération des chemins de fichiers à partir de l'entrée utilisateur
     path_agent = Agents.path_agent()
+    if not path_agent:
+        print("❌ Impossible de créer l'agent de chemin. Vérifiez votre clé API Claude.")
+        return
+        
     path_task = Tasks.get_file_path_task(agent=path_agent, filetree=global_path, user_input=user_input)
     
     print(f"\n🔍 Recherche des fichiers correspondant à '{user_input}'...")
     paths_output = path_task.execute()
     
     try:
-        paths = ast.literal_eval(paths_output)
+        # Tenter d'analyser le résultat comme JSON d'abord
+        try:
+            paths = json.loads(paths_output)
+        except json.JSONDecodeError:
+            # Si ce n'est pas un JSON valide, essayer avec ast.literal_eval
+            paths = ast.literal_eval(paths_output)
         
         if not paths:
             print(f"❌ Aucun fichier trouvé correspondant à '{user_input}'")
