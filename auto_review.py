@@ -7,7 +7,7 @@ import os
 import json
 import argparse
 import ast
-from claude_code_reviewer import ReviewCrew, get_file_tree
+from claude_code_reviewer import ReviewCrew
 
 def parse_args():
     """Parse command line arguments"""
@@ -64,8 +64,8 @@ def main():
     print(f"\n🔍 Analyse du dépôt {owner}/{repo}...")
     
     # Retrieve repository file tree
-    global_path = ""
-    get_file_tree(owner=owner, repo=repo, global_path_var=global_path)
+    from claude_code_reviewer import get_file_tree, global_path
+    get_file_tree(owner=owner, repo=repo)
     
     if not global_path:
         print("❌ Impossible de récupérer la structure du dépôt. Vérifiez vos identifiants et l'URL.")
