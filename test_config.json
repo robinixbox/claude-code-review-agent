@@ -1,0 +1,23 @@
+{
+  "repo_url": "https://github.com/ikarus23/MifareClassicTool",
+  "target_path": "Mifare Classic Tool/app/src/main/java/de/syss/MifareClassicTool/Activities/KeyMapCreator.java",
+  "exclude_paths": [
+    "node_modules",
+    "venv",
+    ".env",
+    ".git",
+    "__pycache__"
+  ],
+  "review_settings": {
+    "max_files_per_run": 1,
+    "language_focus": "java",
+    "debug_mode": true,
+    "verbose_output": true,
+    "checks": [
+      "code_quality",
+      "performance",
+      "security",
+      "best_practices"
+    ]
+  }
+}
