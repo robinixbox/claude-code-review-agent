@@ -1,0 +1,141 @@
+name: Code Review Automation (Enhanced)
+
+on:
+  # Exécution manuelle depuis l'interface GitHub
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: 'URL du dépôt GitHub à analyser'
+        required: true
+        type: string
+      target_path:
+        description: 'Nom du fichier ou du dossier à examiner'
+        required: true
+        type: string
+      debug_mode:
+        description: 'Activer le mode débogage (plus de logs)'
+        required: false
+        type: boolean
+        default: false
+  
+  # Exécution programmée (une fois par jour à minuit)
+  schedule:
+    - cron: '0 0 * * *'
+  
+  # Exécution lors d'une ouverture/mise à jour de pull request
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - '**.py'  # Limiter aux fichiers Python
+
+jobs:
+  review_code:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        id: checkout
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+        id: setup_python
+      
+      - name: Install dependencies
+        run: |
+          echo "📦 Installation des dépendances..."
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          echo "✅ Dépendances installées avec succès"
+        id: install_deps
+      
+      - name: Check environment variables
+        run: |
+          echo "🔍 Vérification des variables d'environnement..."
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "❌ ERREUR: La clé API Anthropic (ANTHROPIC_API_KEY) n'est pas configurée dans les secrets"
+            exit 1
+          fi
+          if [ -z "${{ secrets.GITHUB_API_KEY }}" ]; then
+            echo "❌ ERREUR: La clé API GitHub (GITHUB_API_KEY) n'est pas configurée dans les secrets"
+            exit 1
+          fi
+          echo "✅ Variables d'environnement vérifiées"
+        id: check_env
+      
+      - name: Debug info
+        if: ${{ github.event.inputs.debug_mode == 'true' || github.event_name == 'workflow_dispatch' }}
+        run: |
+          echo "🔍 Mode débogage activé"
+          echo "- Événement: ${{ github.event_name }}"
+          echo "- Répertoire de travail: $(pwd)"
+          echo "- Contenu du répertoire:"
+          ls -la
+          echo "- Version Python:"
+          python --version
+          echo "- Packages installés:"
+          pip list
+        id: debug_info
+      
+      - name: Run code review on scheduled or manual trigger
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_API_KEY: ${{ secrets.GITHUB_API_KEY }}
+          GITHUB_USERNAME: ${{ secrets.GITHUB_USERNAME }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
+          DEBUG_MODE: ${{ github.event.inputs.debug_mode || 'false' }}
+        run: |
+          echo "🚀 Démarrage de la revue de code..."
+          
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "📋 Revue manuelle: ${{ github.event.inputs.repo_url }} - ${{ github.event.inputs.target_path }}"
+            if [ "$DEBUG_MODE" == "true" ]; then
+              python -u auto_review.py --repo "${{ github.event.inputs.repo_url }}" --target "${{ github.event.inputs.target_path }}" --debug
+            else
+              python -u auto_review.py --repo "${{ github.event.inputs.repo_url }}" --target "${{ github.event.inputs.target_path }}"
+            fi
+          else
+            echo "🕒 Revue programmée: utilisation du fichier config.json"
+            if [ "$DEBUG_MODE" == "true" ]; then
+              python -u auto_review.py --config config.json --debug
+            else
+              python -u auto_review.py --config config.json
+            fi
+          fi
+          
+          echo "✅ Revue de code terminée"
+        id: run_review_manual
+      
+      - name: Run code review on pull request
+        if: github.event_name == 'pull_request'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_API_KEY: ${{ secrets.GITHUB_API_KEY }}
+          GITHUB_USERNAME: ${{ secrets.GITHUB_USERNAME }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_PAGE_ID: ${{ secrets.NOTION_PAGE_ID }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEBUG_MODE: ${{ github.event.inputs.debug_mode || 'false' }}
+        run: |
+          echo "🚀 Démarrage de la revue de code pour PR #$PR_NUMBER..."
+          
+          if [ "$DEBUG_MODE" == "true" ]; then
+            python -u pr_review.py --repo "${{ github.repository }}" --pr $PR_NUMBER --debug
+          else
+            python -u pr_review.py --repo "${{ github.repository }}" --pr $PR_NUMBER
+          fi
+          
+          echo "✅ Revue de PR terminée"
+        id: run_review_pr
+      
+      - name: Handle errors
+        if: failure()
+        run: |
+          echo "❌ Une erreur s'est produite lors de l'exécution du workflow"
+          echo "⚠️ Vérifiez les logs ci-dessus pour plus de détails"
+          echo "💡 Assurez-vous que toutes les variables d'environnement sont correctement configurées"
+        id: handle_errors
