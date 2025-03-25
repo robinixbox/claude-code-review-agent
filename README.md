@@ -10,6 +10,8 @@ Un agent autonome créé avec [CrewAI](https://www.crewai.io/) et l'API Claude d
 - Intégration simple avec GitHub
 - Exportation des résultats dans un document Notion (optionnel)
 - Support des projets Python (extensible à d'autres langages)
+- **Nouveau**: Exécution autonome via GitHub Actions
+- **Nouveau**: Revue automatique des Pull Requests
 
 ## 🔧 Prérequis
 
@@ -45,6 +47,8 @@ Un agent autonome créé avec [CrewAI](https://www.crewai.io/) et l'API Claude d
 
 ## 💻 Utilisation
 
+### Exécution manuelle
+
 Exécutez le script principal:
 
 ```bash
@@ -55,13 +59,41 @@ Le script vous demandera:
 1. L'URL du dépôt GitHub à analyser (ex: https://github.com/username/repository)
 2. Le nom du fichier ou du dossier à examiner
 
-L'agent va alors:
-1. Récupérer la structure du dépôt GitHub
-2. Identifier les fichiers correspondant à votre recherche
-3. Analyser chaque fichier à l'aide de l'API Claude
-4. Générer des recommandations d'amélioration et du code optimisé
-5. Afficher les résultats dans le terminal
-6. Exporter les résultats dans Notion (si configuré)
+### Exécution autonome
+
+Vous pouvez également utiliser la version automatisée du script:
+
+```bash
+python auto_review.py --repo https://github.com/username/repository --target path/to/file
+```
+
+Ou avec un fichier de configuration:
+
+```bash
+python auto_review.py --config config.json
+```
+
+### Exécution avec GitHub Actions
+
+L'agent peut être configuré pour s'exécuter automatiquement via GitHub Actions:
+
+1. **Exécution programmée**: L'agent s'exécute automatiquement une fois par jour pour analyser le code selon la configuration.
+
+2. **Exécution manuelle**: Vous pouvez déclencher l'analyse manuellement depuis l'onglet Actions de GitHub.
+
+3. **Analyse de Pull Request**: L'agent analyse automatiquement les fichiers modifiés dans une PR et ajoute un commentaire avec les résultats.
+
+#### Configuration des Secrets GitHub
+
+Pour utiliser GitHub Actions, vous devez configurer les secrets suivants dans votre dépôt:
+
+1. Allez dans les paramètres du dépôt > Secrets and variables > Actions
+2. Ajoutez les secrets suivants:
+   - `ANTHROPIC_API_KEY`: Votre clé API Claude
+   - `GITHUB_API_KEY`: Votre token d'accès personnel GitHub
+   - `GITHUB_USERNAME`: Votre nom d'utilisateur GitHub
+   - `NOTION_API_KEY`: Votre clé API Notion (optionnel)
+   - `NOTION_PAGE_ID`: L'ID de votre page Notion (optionnel)
 
 ## ⏱️ Temps d'exécution
 
@@ -77,7 +109,11 @@ L'agent analyse les fichiers un par un, ce qui permet d'obtenir des premiers ré
 
 ```
 claude-code-review-agent/
-├── claude_code_reviewer.py    # Script principal
+├── claude_code_reviewer.py    # Script principal interactif
+├── auto_review.py             # Script d'exécution autonome
+├── pr_review.py               # Script d'analyse des Pull Requests
+├── .github/workflows/         # Workflows GitHub Actions
+├── config.json                # Configuration par défaut
 ├── .env.example               # Exemple de configuration des clés API
 ├── requirements.txt           # Dépendances du projet
 └── README.md                  # Documentation
@@ -91,7 +127,17 @@ claude-code-review-agent/
 
 3. **Revue du code** : L'agent Claude analyse chaque fichier et propose des améliorations basées sur les meilleures pratiques de développement.
 
-4. **Exportation des résultats** : Les résultats sont affichés dans la console et peuvent être exportés vers Notion (si configuré).
+4. **Exportation des résultats** : Les résultats sont affichés dans la console, exportés vers Notion (si configuré) ou postés comme commentaires sur les Pull Requests.
+
+### Intégration avec GitHub Actions
+
+Le workflow GitHub Actions permet trois modes de fonctionnement:
+
+1. **Exécution programmée**: Analyse quotidienne du code selon la configuration dans `config.json`.
+
+2. **Exécution manuelle**: Déclenchement manuel avec spécification du dépôt et du chemin à analyser.
+
+3. **Analyse de Pull Request**: Détection automatique des modifications dans une PR et analyse des fichiers Python modifiés.
 
 ## 🤝 Contribution
 
