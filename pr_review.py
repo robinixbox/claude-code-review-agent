@@ -7,6 +7,7 @@ import os
 import argparse
 import requests
 import json
+import traceback
 from claude_code_reviewer import ReviewCrew
 
 def parse_args():
@@ -112,17 +113,26 @@ def main():
         print(f"\n📄 ({i+1}/{len(python_files)}) Analyse de {filename}...")
         
         # Execute the review crew
-        review_crew = ReviewCrew(owner=owner, repo=repo, page_id=page_id, path=filename)
-        result = review_crew.run()
-        
-        # Save the result
-        review_results.append({
-            "file": filename,
-            "result": result
-        })
-        
-        # Display results
-        print(f"✅ Revue terminée pour {filename}")
+        try:
+            review_crew = ReviewCrew(owner=owner, repo=repo, page_id=page_id, path=filename)
+            result = review_crew.run()
+            
+            # Save the result
+            review_results.append({
+                "file": filename,
+                "result": result
+            })
+            
+            # Display results
+            print(f"✅ Revue terminée pour {filename}")
+        except Exception as e:
+            print(f"❌ Erreur lors de l'analyse de {filename}: {e}")
+            print(traceback.format_exc())
+            review_results.append({
+                "file": filename,
+                "result": f"Erreur: {str(e)}",
+                "error": True
+            })
     
     # Format PR comment
     review_comment = "# 🤖 Revue de code automatique\n\n"
@@ -130,18 +140,43 @@ def main():
     
     for result in review_results:
         try:
-            # Assuming result is a string representation of a list or tuple
-            parsed_result = json.loads(result["result"].replace("'", "\""))
-            if len(parsed_result) >= 3:
+            if result.get("error", False):
+                review_comment += f"## Fichier: `{result['file']}`\n\n"
+                review_comment += "⚠️ Erreur lors de l'analyse de ce fichier.\n\n"
+                review_comment += f"```\n{result['result']}\n```\n\n"
+                review_comment += "---\n\n"
+                continue
+                
+            # Tentative d'analyse du résultat sous forme de chaîne JSON
+            try:
+                # Essayer d'abord en supposant que c'est un JSON valide
+                parsed_result = json.loads(result["result"])
+            except json.JSONDecodeError:
+                # Si ce n'est pas un JSON valide, essayer en remplaçant les apostrophes
+                parsed_result = json.loads(result["result"].replace("'", "\""))
+                
+            if isinstance(parsed_result, list) and len(parsed_result) >= 3:
+                project_name = parsed_result[0]
                 file_path = parsed_result[1]
                 review_text = parsed_result[2]
                 
                 review_comment += f"## Fichier: `{file_path}`\n\n"
                 review_comment += f"{review_text}\n\n"
+                
+                # Ajouter le code amélioré si disponible
+                if len(parsed_result) >= 4:
+                    review_comment += "### Code amélioré suggéré:\n\n"
+                    review_comment += f"```python\n{parsed_result[3]}\n```\n\n"
+                    
+                review_comment += "---\n\n"
+            else:
+                review_comment += f"## Fichier: `{result['file']}`\n\n"
+                review_comment += "Format de résultat inattendu. Voici la sortie brute:\n\n"
+                review_comment += f"```\n{result['result']}\n```\n\n"
                 review_comment += "---\n\n"
         except Exception as e:
             review_comment += f"## Fichier: `{result['file']}`\n\n"
-            review_comment += "⚠️ Erreur lors de l'analyse de ce fichier.\n\n"
+            review_comment += f"⚠️ Erreur lors de l'analyse du résultat: {str(e)}\n\n"
             review_comment += "---\n\n"
     
     review_comment += "\n\n> Cette revue a été générée automatiquement par Claude Code Review Agent."
